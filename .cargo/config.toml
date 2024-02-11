@@ -1,0 +1,14 @@
+[build.'cfg(not(windows))']
+target = "x86_64-pc-windows-gnu"
+[build.'cfg(windows)']
+target = "x86_64-pc-windows-msvc"
+[target.x86_64-pc-windows-msvc]
+# linker = "lld"
+linker = "rust-lld.exe"
+# rustflags = []   # Here is the key to solving this problem
+rustflags = [
+    "-Zshare-generics=off",
+    "-Lnative=/home/xertrov/.xwin/crt/lib/x86_64",
+    "-Lnative=/home/xertrov/.xwin/sdk/lib/um/x86_64",
+    "-Lnative=/home/xertrov/.xwin/sdk/lib/ucrt/x86_64",
+]

@@ -1,15 +1,18 @@
+use crate::{Device, DeviceContext};
+use bytemuck::Pod;
+use egui::epaint::{ImageDelta, Primitive, Vertex};
+use egui::{
+    ClippedPrimitive, Mesh, PaintCallbackInfo, Rect, TextureFilter, TextureId, TextureOptions,
+};
 use std::collections::HashMap;
 use std::io::Write;
 use std::mem::size_of;
-use bytemuck::Pod;
-use egui::epaint::{ImageDelta, Primitive, Vertex};
-use egui::{ClippedPrimitive, Mesh, PaintCallbackInfo, Rect, TextureFilter, TextureId, TextureOptions};
 use windows::core::s;
 use windows::Win32::Foundation::{FALSE, RECT, TRUE};
-use windows::Win32::Graphics::Direct3D11::*;
+use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
-use crate::{Device, DeviceContext};
 
 pub struct CallbackFn {
     #[allow(clippy::type_complexity)]
@@ -36,43 +39,48 @@ pub struct Painter {
     input_layout: ID3D11InputLayout,
     constant_buffer: ID3D11Buffer,
 
-    textures: HashMap<TextureId, Texture>
+    textures: HashMap<TextureId, Texture>,
 }
 
 impl Painter {
-
     pub fn new(device: impl Into<Device>, context: impl Into<DeviceContext>) -> Self {
         let device = device.into();
         let context = context.into();
         let rasterizer_state = make_resource(|ptr| unsafe {
-            device.CreateRasterizerState(&D3D11_RASTERIZER_DESC {
-                FillMode: D3D11_FILL_SOLID,
-                CullMode: D3D11_CULL_NONE,
-                FrontCounterClockwise: FALSE,
-                DepthBias: 0,
-                DepthBiasClamp: 0.0,
-                SlopeScaledDepthBias: 0.0,
-                DepthClipEnable: TRUE,
-                ScissorEnable: TRUE,
-                MultisampleEnable: FALSE,
-                AntialiasedLineEnable: FALSE,
-            }, ptr)
+            device.CreateRasterizerState(
+                &D3D11_RASTERIZER_DESC {
+                    FillMode: D3D11_FILL_SOLID,
+                    CullMode: D3D11_CULL_NONE,
+                    FrontCounterClockwise: FALSE,
+                    DepthBias: 0,
+                    DepthBiasClamp: 0.0,
+                    SlopeScaledDepthBias: 0.0,
+                    DepthClipEnable: TRUE,
+                    ScissorEnable: TRUE,
+                    MultisampleEnable: FALSE,
+                    AntialiasedLineEnable: FALSE,
+                },
+                ptr,
+            )
         });
         let blend_state = make_resource(|ptr| unsafe {
-            device.CreateBlendState(&D3D11_BLEND_DESC {
-                AlphaToCoverageEnable: FALSE,
-                IndependentBlendEnable: FALSE,
-                RenderTarget: [D3D11_RENDER_TARGET_BLEND_DESC {
-                    BlendEnable: TRUE,
-                    SrcBlend: D3D11_BLEND_ONE,
-                    DestBlend: D3D11_BLEND_INV_SRC_ALPHA,
-                    BlendOp: D3D11_BLEND_OP_ADD,
-                    SrcBlendAlpha: D3D11_BLEND_INV_DEST_ALPHA,
-                    DestBlendAlpha:  D3D11_BLEND_ONE,
-                    BlendOpAlpha: D3D11_BLEND_OP_ADD,
-                    RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as _,
-                }; 8],
-            }, ptr)
+            device.CreateBlendState(
+                &D3D11_BLEND_DESC {
+                    AlphaToCoverageEnable: FALSE,
+                    IndependentBlendEnable: FALSE,
+                    RenderTarget: [D3D11_RENDER_TARGET_BLEND_DESC {
+                        BlendEnable: TRUE,
+                        SrcBlend: D3D11_BLEND_ONE,
+                        DestBlend: D3D11_BLEND_INV_SRC_ALPHA,
+                        BlendOp: D3D11_BLEND_OP_ADD,
+                        SrcBlendAlpha: D3D11_BLEND_INV_DEST_ALPHA,
+                        DestBlendAlpha: D3D11_BLEND_ONE,
+                        BlendOpAlpha: D3D11_BLEND_OP_ADD,
+                        RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as _,
+                    }; 8],
+                },
+                ptr,
+            )
         });
         let vertex_buffer = make_resource(|ptr| unsafe {
             device.CreateBuffer(
@@ -80,9 +88,12 @@ impl Painter {
                     ByteWidth: (200 * size_of::<Vertex>()) as u32,
                     Usage: D3D11_USAGE_DYNAMIC,
                     BindFlags: D3D11_BIND_VERTEX_BUFFER.0 as u32,
-                    CPUAccessFlags:  D3D11_CPU_ACCESS_WRITE.0 as u32,
+                    CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
                     ..Default::default()
-                }, None, ptr)
+                },
+                None,
+                ptr,
+            )
         });
         let index_buffer = make_resource(|ptr| unsafe {
             device.CreateBuffer(
@@ -90,58 +101,117 @@ impl Painter {
                     ByteWidth: (200 * size_of::<u32>()) as u32,
                     Usage: D3D11_USAGE_DYNAMIC,
                     BindFlags: D3D11_BIND_INDEX_BUFFER.0 as u32,
-                    CPUAccessFlags:  D3D11_CPU_ACCESS_WRITE.0 as u32,
+                    CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
                     ..Default::default()
-                }, None, ptr)
+                },
+                None,
+                ptr,
+            )
         });
         let constant_buffer = make_resource(|ptr| unsafe {
             device.CreateBuffer(
                 &D3D11_BUFFER_DESC {
-                    ByteWidth: (size_of::<[f32;4]>()) as u32,
+                    ByteWidth: (size_of::<[f32; 4]>()) as u32,
                     Usage: D3D11_USAGE_DYNAMIC,
                     BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
-                    CPUAccessFlags:  D3D11_CPU_ACCESS_WRITE.0 as u32,
+                    CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
                     ..Default::default()
-                }, None, ptr)
+                },
+                None,
+                ptr,
+            )
         });
-        let vs_blob = include_bytes!(concat!(env!("OUT_DIR"), "/shader.vs_blob"));
-        let ps_blob = include_bytes!(concat!(env!("OUT_DIR"), "/shader.ps_blob"));
-        let vertex_shader = make_resource(|ptr| unsafe {
-            device.CreateVertexShader(vs_blob, None, ptr)
-        });
-        let pixel_shader = make_resource(|ptr| unsafe {
-            device.CreatePixelShader(ps_blob, None, ptr)
-        });
+        // let vs_blob = include_bytes!(concat!(env!("OUT_DIR"), "/shader.vs_blob"));
+        // let ps_blob = include_bytes!(concat!(env!("OUT_DIR"), "/shader.ps_blob"));
+
+        let mut vs_blob = None;
+        let mut ps_blob = None;
+        let vs_blob = unsafe {
+            D3DCompile(
+                SHADER_CODE.as_ptr() as _,
+                SHADER_CODE.len(),
+                s!("shader.hlsl"),
+                None,
+                None,
+                s!("vs_main"),
+                s!("vs_5_0"),
+                0,
+                0,
+                &mut vs_blob,
+                None,
+            )
+            .unwrap();
+            vs_blob.unwrap()
+        };
+        let ps_blob = unsafe {
+            D3DCompile(
+                SHADER_CODE.as_ptr() as _,
+                SHADER_CODE.len(),
+                s!("shader.hlsl"),
+                None,
+                None,
+                s!("ps_main"),
+                s!("ps_5_0"),
+                0,
+                0,
+                &mut ps_blob,
+                None,
+            )
+            .unwrap();
+            ps_blob.unwrap()
+        };
+
+        let vs_blob = unsafe {
+            std::slice::from_raw_parts(
+                vs_blob.GetBufferPointer() as *const u8,
+                vs_blob.GetBufferSize(),
+            )
+        };
+        let ps_blob = unsafe {
+            std::slice::from_raw_parts(
+                ps_blob.GetBufferPointer() as *const u8,
+                ps_blob.GetBufferSize(),
+            )
+        };
+
+        let vertex_shader =
+            make_resource(|ptr| unsafe { device.CreateVertexShader(vs_blob, None, ptr) });
+        let pixel_shader =
+            make_resource(|ptr| unsafe { device.CreatePixelShader(ps_blob, None, ptr) });
         let input_layout = make_resource(|ptr| unsafe {
-            device.CreateInputLayout(&[
-                D3D11_INPUT_ELEMENT_DESC {
-                    SemanticName: s!("POSITION"),
-                    SemanticIndex: 0,
-                    Format: DXGI_FORMAT_R32G32_FLOAT,
-                    InputSlot: 0,
-                    AlignedByteOffset: 0,
-                    InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-                    InstanceDataStepRate: 0,
-                },
-                D3D11_INPUT_ELEMENT_DESC {
-                    SemanticName: s!("TEXCOORD"),
-                    SemanticIndex: 0,
-                    Format: DXGI_FORMAT_R32G32_FLOAT,
-                    InputSlot: 0,
-                    AlignedByteOffset: D3D11_APPEND_ALIGNED_ELEMENT,
-                    InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-                    InstanceDataStepRate: 0,
-                },
-                D3D11_INPUT_ELEMENT_DESC {
-                    SemanticName: s!("COLOR"),
-                    SemanticIndex: 0,
-                    Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                    InputSlot: 0,
-                    AlignedByteOffset: D3D11_APPEND_ALIGNED_ELEMENT,
-                    InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-                    InstanceDataStepRate: 0,
-                },
-            ], vs_blob, ptr)
+            device.CreateInputLayout(
+                &[
+                    D3D11_INPUT_ELEMENT_DESC {
+                        SemanticName: s!("POSITION"),
+                        SemanticIndex: 0,
+                        Format: DXGI_FORMAT_R32G32_FLOAT,
+                        InputSlot: 0,
+                        AlignedByteOffset: 0,
+                        InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+                        InstanceDataStepRate: 0,
+                    },
+                    D3D11_INPUT_ELEMENT_DESC {
+                        SemanticName: s!("TEXCOORD"),
+                        SemanticIndex: 0,
+                        Format: DXGI_FORMAT_R32G32_FLOAT,
+                        InputSlot: 0,
+                        AlignedByteOffset: D3D11_APPEND_ALIGNED_ELEMENT,
+                        InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+                        InstanceDataStepRate: 0,
+                    },
+                    D3D11_INPUT_ELEMENT_DESC {
+                        SemanticName: s!("COLOR"),
+                        SemanticIndex: 0,
+                        Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                        InputSlot: 0,
+                        AlignedByteOffset: D3D11_APPEND_ALIGNED_ELEMENT,
+                        InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+                        InstanceDataStepRate: 0,
+                    },
+                ],
+                vs_blob,
+                ptr,
+            )
         });
         Self {
             device,
@@ -158,34 +228,57 @@ impl Painter {
         }
     }
 
-    fn update_buffer<T: Pod>(device: &Device, context: &DeviceContext, buffer: &mut ID3D11Buffer, data: &[T]) {
+    fn update_buffer<T: Pod>(
+        device: &Device,
+        context: &DeviceContext,
+        buffer: &mut ID3D11Buffer,
+        data: &[T],
+    ) {
         unsafe {
             let required_data = (data.len() * size_of::<T>()) as u32;
             let mut desc = retrieve(buffer, ID3D11Buffer::GetDesc);
             if desc.ByteWidth < required_data {
                 desc.ByteWidth = required_data;
-                *buffer = make_resource(|ptr| {
-                    device.CreateBuffer(&desc, None, ptr)
-                });
+                *buffer = make_resource(|ptr| device.CreateBuffer(&desc, None, ptr));
             }
             let buffer: &ID3D11Buffer = buffer;
 
             let mut slice = {
                 let mut resource = std::mem::MaybeUninit::zeroed();
-                context.Map(buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(resource.as_mut_ptr()))
+                context
+                    .Map(
+                        buffer,
+                        0,
+                        D3D11_MAP_WRITE_DISCARD,
+                        0,
+                        Some(resource.as_mut_ptr()),
+                    )
                     .expect("Can not map buffer");
-                std::slice::from_raw_parts_mut(resource.assume_init().pData as *mut u8, desc.ByteWidth as usize)
+                std::slice::from_raw_parts_mut(
+                    resource.assume_init().pData as *mut u8,
+                    desc.ByteWidth as usize,
+                )
             };
-            slice.write_all(bytemuck::cast_slice(data))
+            slice
+                .write_all(bytemuck::cast_slice(data))
                 .expect("Can not update buffer data");
             context.Unmap(buffer, 0);
         }
     }
 
-    pub fn paint_primitives(&mut self, screen_size_px: [u32; 2], pixels_per_point: f32, clipped_primitives: &[ClippedPrimitive]) {
+    pub fn paint_primitives(
+        &mut self,
+        screen_size_px: [u32; 2],
+        pixels_per_point: f32,
+        clipped_primitives: &[ClippedPrimitive],
+    ) {
         let size_in_pixels = unsafe { self.prepare_painting(screen_size_px, pixels_per_point) };
 
-        for ClippedPrimitive { clip_rect, primitive, } in clipped_primitives {
+        for ClippedPrimitive {
+            clip_rect,
+            primitive,
+        } in clipped_primitives
+        {
             set_clip_rect(&self.context, size_in_pixels, pixels_per_point, *clip_rect);
 
             match primitive {
@@ -242,33 +335,51 @@ impl Painter {
     fn paint_mesh(&mut self, mesh: &Mesh) {
         debug_assert!(mesh.is_valid());
         if let Some(texture) = self.textures.get(&mesh.texture_id) {
-            Self::update_buffer(&self.device, &self.context, &mut self.vertex_buffer, &mesh.vertices);
-            Self::update_buffer(&self.device, &self.context, &mut self.index_buffer, &mesh.indices);
+            Self::update_buffer(
+                &self.device,
+                &self.context,
+                &mut self.vertex_buffer,
+                &mesh.vertices,
+            );
+            Self::update_buffer(
+                &self.device,
+                &self.context,
+                &mut self.index_buffer,
+                &mesh.indices,
+            );
 
             unsafe {
-                self.context.IASetIndexBuffer(&self.index_buffer, DXGI_FORMAT_R32_UINT, 0);
+                self.context
+                    .IASetIndexBuffer(&self.index_buffer, DXGI_FORMAT_R32_UINT, 0);
                 self.context.IASetVertexBuffers(
                     0,
                     1,
                     Some(&Some(self.vertex_buffer.clone())),
                     Some(&(size_of::<Vertex>() as u32)),
-                    Some(&0)
+                    Some(&0),
                 );
-                self.context.PSSetSamplers(0,Some(&[Some(texture.sampler.clone())]));
-                self.context.PSSetShaderResources(0, Some(&[Some(texture.view.clone())]));
-                self.context.DrawIndexed(mesh.indices.len() as u32, 0 ,0);
+                self.context
+                    .PSSetSamplers(0, Some(&[Some(texture.sampler.clone())]));
+                self.context
+                    .PSSetShaderResources(0, Some(&[Some(texture.view.clone())]));
+                self.context.DrawIndexed(mesh.indices.len() as u32, 0, 0);
             }
-
         } else {
             log::warn!("Failed to find texture {:?}", mesh.texture_id);
         }
     }
 
-    unsafe fn prepare_painting(&mut self, [width_in_pixels, height_in_pixels]: [u32; 2], pixels_per_point: f32, ) -> (u32, u32) {
+    unsafe fn prepare_painting(
+        &mut self,
+        [width_in_pixels, height_in_pixels]: [u32; 2],
+        pixels_per_point: f32,
+    ) -> (u32, u32) {
         self.context.RSSetState(&self.rasterizer_state);
-        self.context.OMSetBlendState(&self.blend_state, None, u32::MAX);
+        self.context
+            .OMSetBlendState(&self.blend_state, None, u32::MAX);
 
-        self.context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        self.context
+            .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         self.context.IASetInputLayout(&self.input_layout);
         self.context.VSSetShader(&self.vertex_shader, None);
         self.context.PSSetShader(&self.pixel_shader, None);
@@ -285,37 +396,62 @@ impl Painter {
             MaxDepth: 1.0,
         }]));
 
-        Self::update_buffer(&self.device, &self.context, &mut self.constant_buffer, &[width_in_points, height_in_points]);
-        self.context.VSSetConstantBuffers(0, Some(&[
-            Some(self.constant_buffer.clone())
-        ]));
+        Self::update_buffer(
+            &self.device,
+            &self.context,
+            &mut self.constant_buffer,
+            &[width_in_points, height_in_points],
+        );
+        self.context
+            .VSSetConstantBuffers(0, Some(&[Some(self.constant_buffer.clone())]));
 
         (width_in_pixels, height_in_pixels)
     }
 
     pub fn set_texture(&mut self, tex_id: TextureId, delta: &ImageDelta) {
-        let texture = self.textures
+        let texture = self
+            .textures
             .entry(tex_id)
             .or_insert_with(|| Texture::new(&self.device, delta.image.size(), delta.options));
 
         match &delta.image {
             egui::ImageData::Color(image) => {
-                assert_eq!(image.width() * image.height(), image.pixels.len(),
-                    "Mismatch between texture size and texel count");
+                assert_eq!(
+                    image.width() * image.height(),
+                    image.pixels.len(),
+                    "Mismatch between texture size and texel count"
+                );
 
                 let data: &[u8] = bytemuck::cast_slice(image.pixels.as_ref());
-                texture.upload_texture_srgb(&self.device, &self.context, delta.pos, image.size, delta.options, data);
+                texture.upload_texture_srgb(
+                    &self.device,
+                    &self.context,
+                    delta.pos,
+                    image.size,
+                    delta.options,
+                    data,
+                );
             }
             egui::ImageData::Font(image) => {
-                assert_eq!(image.width() * image.height(), image.pixels.len(),
-                    "Mismatch between texture size and texel count");
+                assert_eq!(
+                    image.width() * image.height(),
+                    image.pixels.len(),
+                    "Mismatch between texture size and texel count"
+                );
 
                 let data: Vec<u8> = image
                     .srgba_pixels(None)
                     .flat_map(|a| a.to_array())
                     .collect();
 
-                texture.upload_texture_srgb(&self.device, &self.context, delta.pos, image.size, delta.options, &data);
+                texture.upload_texture_srgb(
+                    &self.device,
+                    &self.context,
+                    delta.pos,
+                    image.size,
+                    delta.options,
+                    &data,
+                );
             }
         }
     }
@@ -324,13 +460,15 @@ impl Painter {
         self.textures.remove(&tex_id);
     }
 
-    pub fn destroy(&mut self) {
-
-    }
-
+    pub fn destroy(&mut self) {}
 }
 
-fn set_clip_rect(context:  &DeviceContext, size_in_pixels: (u32, u32), pixels_per_point: f32, clip_rect: Rect) {
+fn set_clip_rect(
+    context: &DeviceContext,
+    size_in_pixels: (u32, u32),
+    pixels_per_point: f32,
+    clip_rect: Rect,
+) {
     // Transform clip rect to physical pixels:
     let clip_min_x = pixels_per_point * clip_rect.min.x;
     let clip_min_y = pixels_per_point * clip_rect.min.y;
@@ -350,16 +488,13 @@ fn set_clip_rect(context:  &DeviceContext, size_in_pixels: (u32, u32), pixels_pe
     let clip_max_y = clip_max_y.clamp(clip_min_y, size_in_pixels.1 as i32);
 
     unsafe {
-        context.RSSetScissorRects(Some(&[
-            RECT {
-                left: clip_min_x,
-                top: clip_min_y,
-                right: clip_max_x,
-                bottom: clip_max_y,
-            }
-        ]))
+        context.RSSetScissorRects(Some(&[RECT {
+            left: clip_min_x,
+            top: clip_min_y,
+            right: clip_max_x,
+            bottom: clip_max_y,
+        }]))
     }
-
 }
 
 struct Texture {
@@ -371,37 +506,43 @@ struct Texture {
 impl Texture {
     fn new(device: &Device, [width, height]: [usize; 2], options: TextureOptions) -> Self {
         let texture = make_resource(|ptr| unsafe {
-            device.CreateTexture2D(&D3D11_TEXTURE2D_DESC {
-                Width: width as u32,
-                Height: height as u32,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                SampleDesc: DXGI_SAMPLE_DESC {
-                    Count: 1,
-                    Quality: 0,
+            device.CreateTexture2D(
+                &D3D11_TEXTURE2D_DESC {
+                    Width: width as u32,
+                    Height: height as u32,
+                    MipLevels: 1,
+                    ArraySize: 1,
+                    Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    Usage: D3D11_USAGE_DEFAULT,
+                    BindFlags: (D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).0 as u32,
+                    CPUAccessFlags: 0,
+                    MiscFlags: 0,
                 },
-                Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: (D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).0 as u32,
-                CPUAccessFlags: 0,
-                MiscFlags: 0,
-            }, None, ptr)
+                None,
+                ptr,
+            )
         });
-        let view = make_resource(|ptr| unsafe {
-            device.CreateShaderResourceView(&texture, None, ptr)
-        });
+        let view =
+            make_resource(|ptr| unsafe { device.CreateShaderResourceView(&texture, None, ptr) });
         let sampler = make_resource(|ptr| unsafe {
-            device.CreateSamplerState(&D3D11_SAMPLER_DESC {
-                Filter: make_filter(options),
-                AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
-                AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
-                AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
-                MipLODBias: 0.0,
-                MaxAnisotropy: 1,
-                MinLOD: f32::MIN,
-                MaxLOD: f32::MAX,
-                ..Default::default()
-            }, ptr)
+            device.CreateSamplerState(
+                &D3D11_SAMPLER_DESC {
+                    Filter: make_filter(options),
+                    AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
+                    AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
+                    AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
+                    MipLODBias: 0.0,
+                    MaxAnisotropy: 1,
+                    MinLOD: f32::MIN,
+                    MaxLOD: f32::MAX,
+                    ..Default::default()
+                },
+                ptr,
+            )
         });
         Self {
             texture,
@@ -410,37 +551,49 @@ impl Texture {
         }
     }
 
-    fn upload_texture_srgb(&mut self, device: &Device, context: &DeviceContext,
-                           pos: Option<[usize; 2]>, [w, h]: [usize; 2], options: TextureOptions, data: &[u8]) {
+    fn upload_texture_srgb(
+        &mut self,
+        device: &Device,
+        context: &DeviceContext,
+        pos: Option<[usize; 2]>,
+        [w, h]: [usize; 2],
+        options: TextureOptions,
+        data: &[u8],
+    ) {
         let max_size = D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION as usize;
         assert_eq!(data.len(), w * h * 4);
-        assert!(w <= max_size && h <= max_size,
-                "Got a texture image of size {}x{}, but the maximum supported texture side is only {}",
-                w, h, max_size);
+        assert!(
+            w <= max_size && h <= max_size,
+            "Got a texture image of size {}x{}, but the maximum supported texture side is only {}",
+            w,
+            h,
+            max_size
+        );
         unsafe {
             let filter = make_filter(options);
             let mut desc = retrieve(&self.sampler, ID3D11SamplerState::GetDesc);
             if desc.Filter != filter {
                 desc.Filter = filter;
-                self.sampler = make_resource(|ptr| {
-                    device.CreateSamplerState(&desc, ptr)
-                });
+                self.sampler = make_resource(|ptr| device.CreateSamplerState(&desc, ptr));
             }
         }
         unsafe {
             let mut desc = retrieve(&self.texture, ID3D11Texture2D::GetDesc);
             match pos {
-                None => if desc.Width != w as u32 || desc.Height != h as u32 {
-                    desc.Width = w as u32;
-                    desc.Height = h as u32;
-                    self.texture = make_resource(|ptr| {
-                        device.CreateTexture2D(&desc, None, ptr)
-                    });
-                    self.view = make_resource(|ptr| {
-                        device.CreateShaderResourceView(&self.texture, None, ptr)
-                    });
+                None => {
+                    if desc.Width != w as u32 || desc.Height != h as u32 {
+                        desc.Width = w as u32;
+                        desc.Height = h as u32;
+                        self.texture =
+                            make_resource(|ptr| device.CreateTexture2D(&desc, None, ptr));
+                        self.view = make_resource(|ptr| {
+                            device.CreateShaderResourceView(&self.texture, None, ptr)
+                        });
+                    }
                 }
-                Some([x, y]) => assert!(x + w <= desc.Width as usize && y + h <= desc.Height as usize)
+                Some([x, y]) => {
+                    assert!(x + w <= desc.Width as usize && y + h <= desc.Height as usize)
+                }
             }
         }
         unsafe {
@@ -449,10 +602,11 @@ impl Texture {
             context.UpdateSubresource(
                 &self.texture,
                 level,
-                Some(&make_box(x,y, w, h)),
+                Some(&make_box(x, y, w, h)),
                 data.as_ptr() as _,
                 (4 * w) as u32,
-                (4 * w * h) as u32);
+                (4 * w * h) as u32,
+            );
         }
     }
 }
@@ -463,7 +617,7 @@ fn make_filter(options: TextureOptions) -> D3D11_FILTER {
         (Nearest, Nearest) => D3D11_FILTER_MIN_MAG_MIP_POINT,
         (Linear, Nearest) => D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT,
         (Nearest, Linear) => D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT,
-        (Linear, Linear) => D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT
+        (Linear, Linear) => D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT,
     }
 }
 
@@ -480,8 +634,7 @@ fn make_box(x: usize, y: usize, w: usize, h: usize) -> D3D11_BOX {
 
 fn make_resource<T>(func: impl FnOnce(Option<*mut Option<T>>) -> windows::core::Result<()>) -> T {
     let mut obj = None;
-    func(Some(&mut obj))
-        .expect("Resource creation failed");
+    func(Some(&mut obj)).expect("Resource creation failed");
     obj.expect("Returned resource is null")
 }
 
@@ -492,3 +645,41 @@ fn retrieve<S, T: Default>(self_type: &S, func: unsafe fn(&S, *mut T)) -> T {
         desc
     }
 }
+
+const SHADER_CODE: &str = r"
+struct vs_in {
+    float2 position : POSITION;
+    float2 uv : TEXCOORD;
+    float4 color : COLOR;
+};
+
+struct vs_out {
+    float4 clip : SV_POSITION;
+    float2 uv : TEXCOORD;
+    float4 color : COLOR;
+};
+
+cbuffer cbPerObject{
+    float4 screen_size;
+};
+
+vs_out vs_main(vs_in input) {
+    vs_out output;
+    output.clip = float4(
+        2.0 * input.position.x / screen_size.x - 1.0,
+        1.0 - 2.0 * input.position.y / screen_size.y,
+        0.0,
+        1.0);
+    output.uv = input.uv;
+    output.color = input.color;
+
+    return output;
+}
+
+sampler sampler0;
+Texture2D texture0;
+
+float4 ps_main(vs_out input) : SV_TARGET {
+    return input.color * texture0.Sample(sampler0, input.uv);
+}
+";
